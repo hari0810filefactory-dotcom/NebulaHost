@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Server, Cpu, Play, Square, RotateCw, Shield, Database, Terminal, ShieldAlert, Wifi, Globe, Trash2, Plus, CornerDownRight, Key, Mail, Activity, Download, Settings, Layers, Clock, Sliders, Calendar, TrendingUp } from "lucide-react";
+import { Server, Cpu, Play, Square, RotateCw, Shield, Database, Terminal, ShieldAlert, Wifi, Globe, Trash2, Plus, CornerDownRight, Key, Mail, Activity, Download, Settings, Layers, Clock, Sliders, Calendar, TrendingUp, ChevronDown, ChevronRight } from "lucide-react";
 import { VPSInstance } from "../types";
 
 const INITIAL_VPS: VPSInstance[] = [
@@ -157,6 +157,58 @@ export default function VpsManager() {
 
   // Grouping Modes
   const [groupBy, setGroupBy] = useState<"none" | "project" | "tag">("none");
+
+  // Threshold alert editing states
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+  const [editCpuThreshold, setEditCpuThreshold] = useState(80);
+  const [editRamThreshold, setEditRamThreshold] = useState(80);
+  const [editAlertEmail, setEditAlertEmail] = useState("");
+  const [editAlertEnabled, setEditAlertEnabled] = useState(true);
+
+  // Collapsed categories states
+  const [collapsedProjects, setCollapsedProjects] = useState<{[key: string]: boolean}>({});
+
+  const toggleProjectCollapse = (project: string) => {
+    setCollapsedProjects(prev => ({
+      ...prev,
+      [project]: !prev[project]
+    }));
+  };
+
+  const openAlertModal = () => {
+    if (selectedVps) {
+      setEditCpuThreshold(selectedVps.alerts?.cpuThreshold ?? 80);
+      setEditRamThreshold(selectedVps.alerts?.ramThreshold ?? 80);
+      setEditAlertEmail(selectedVps.alerts?.email ?? "root@nebulaHost.local");
+      setEditAlertEnabled(selectedVps.alerts?.enabled ?? true);
+      setIsAlertModalOpen(true);
+    }
+  };
+
+  const saveAlertSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedVps) return;
+    const updatedAlerts = {
+      cpuThreshold: editCpuThreshold,
+      ramThreshold: editRamThreshold,
+      email: editAlertEmail,
+      enabled: editAlertEnabled,
+    };
+    const updatedVps = {
+      ...selectedVps,
+      alerts: updatedAlerts
+    };
+    setInstances(instances.map(inst => inst.id === selectedVps.id ? updatedVps : inst));
+    setSelectedVps(updatedVps);
+    setIsAlertModalOpen(false);
+
+    setTerminalHistory(prev => [
+      ...prev,
+      `[MONITOR-CONFIG] ⚙️ Threshold alert profiles updated.`,
+      `[MONITOR-CONFIG] CPU alert threshold: ${editCpuThreshold}% | RAM Memory alert threshold: ${editRamThreshold}%`,
+      `[MONITOR-CONFIG] Alerts: ${editAlertEnabled ? "ENABLED" : "DISABLED"} | Target notification queue: ${editAlertEmail}`
+    ]);
+  };
 
   // Firewall creation states
   const [fwPort, setFwPort] = useState(8080);
@@ -435,17 +487,26 @@ export default function VpsManager() {
   const handleGenerateSSHKey = () => {
     if (!selectedVps) return;
 
-    // Simulated high-quality keys
-    const privateKey = `-----BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz
-c2gtZWZDI1NTE5AAAAICXw700b/1rId4g9V+91807y6H/K5xGv8G08tc3oU1vXBA
-AAAIAnre8bZ63vGwAAAAtzc2gtZWZDI1NTE5AAAAICXw700b/1rId4g9V+91807y
-6H/K5xGv8G08tc3oU1vXBAAAAECoWpPiv8Qbe4Fh7uT2Zc/F5XvS6v+GvtXfR3T9
-yKOf3Sfw700b/1rId4g9V+91807y6H/K5xGv8G08tc3oU1vXAAAAE3Jvb3RAbmVi
-dWxhLWhvc3QtbXVsdGk=
------END OPENSSH PRIVATE KEY-----`;
+    // Simulate cryptographic prime generation for a 4096-bit RSA key pair
+    const p = Math.floor(Math.random() * 10000000) + 7919;
+    const q = Math.floor(Math.random() * 10000000) + 104729;
+    const modulus = (BigInt(p) * BigInt(q)).toString();
+    const exponent = "65537";
 
-    const publicKey = `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICXw700b/1rId4g9V+91807y6H/K5xGv8G08tc3oU1vX root@nebula-key-${selectedVps.name}`;
+    // Format PEM block styled 4096-bit private key
+    const privateKey = `-----BEGIN RSA PRIVATE KEY-----
+MIIJKQIBAAKCAgEAv7d2C4LqpM7UytLd2PqD8l/lE8c9Nf/M3t+vA6Rz2L7XU/H9
+m8Z7hD97U+7sH6pL5pZnt/8R3tY7L8s/N+9sHg8N+SaehH8/p3N4D+9K7X/Z8tPf
+Modulus_Bits: 4096
+Simulated_Prime_P: ${p}
+Simulated_Prime_Q: ${q}
+Simulated_RSA_Modulus: ${modulus}
+Simulated_Exp: ${exponent}
+v0b7ePHz+M3u+E/e3D+fE+9f/G8r/+M9z9w/E8L/Nf//Mz/+fE3u/8tPf0b7ePH/
+MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
+-----END RSA PRIVATE KEY-----`;
+
+    const publicKey = `ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDv7d2C4LqpM7UytLd2PqD8l/lE8c9Nf/M3t+vA6Rz2L7XU/H9m8Z7hD97U+7sH6pL5pZnt/8R3tY7L8s/N+9sHg8N+SaehH8/p3N4D+9K7X/Z8tPf/v0b7ePH+M3u+E/e3D+fE+9f/G8r/+M9z9w/E8L/Nf//Mz/+fE3u/8tPf0b7ePH/ root@nebula-rsa-${selectedVps.name}`;
 
     // Private key download
     const privBlob = new Blob([privateKey], { type: "text/plain;charset=utf-8" });
@@ -467,11 +528,13 @@ dWxhLWhvc3QtbXVsdGk=
 
     setTerminalHistory(prev => [
       ...prev,
-      `[SECURITY] Successfully formulated fresh 256-bit Ed25519 secure token keypair.`,
-      `[SECURITY] Initiating local files stream download...`,
-      `[SECURITY] Downloaded Private Key: "${selectedVps.name}_id_rsa.pem" (Safe-keep this file!)`,
-      `[SECURITY] Downloaded Host Public Key: "${selectedVps.name}_id_rsa.pub"`,
-      `[SECURITY] Public key registration complete in ~/.ssh/authorized_keys`
+      `[SECURITY-RSA] 🔑 Running local Pseudo-Random Prime Number Generator (PRNG)...`,
+      `[SECURITY-RSA] Prime p = ${p}, q = ${q} successfully selected.`,
+      `[SECURITY-RSA] Calculated 4096-bit RSA modulo mathematical constant.`,
+      `[SECURITY-RSA] Formulated fresh 4096-bit high-entropy RSA cryptographic private token file.`,
+      `[SECURITY-RSA] Initiating dual key stream download payloads...`,
+      `[SECURITY-RSA] Private Key downloaded: "${selectedVps.name}_id_rsa.pem" (Never share this file!)`,
+      `[SECURITY-RSA] Public Key downloaded: "${selectedVps.name}_id_rsa.pub"`
     ]);
   };
 
@@ -860,17 +923,34 @@ dWxhLWhvc3QtbXVsdGk=
 
       return (
         <div className="space-y-4">
-          {Object.entries(projectsMap).map(([project, list]) => (
-            <div key={project} className="space-y-2 border-l-2 border-indigo-500/25 pl-3 pt-1">
-              <div className="flex items-center gap-1.5 mb-2">
-                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></span>
-                <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-widest">{project} ({list.length})</span>
+          {Object.entries(projectsMap).map(([project, list]) => {
+            const isCollapsed = collapsedProjects[project] ?? false;
+            return (
+              <div key={project} className="space-y-2 border-l-2 border-indigo-500/25 pl-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => toggleProjectCollapse(project)}
+                  className="flex items-center justify-between w-full text-left font-mono text-[10px] font-bold text-indigo-400 uppercase tracking-widest hover:bg-indigo-950/40 rounded px-1.5 py-1 -ml-1.5 transition cursor-pointer"
+                  title="Click to toggle group visibility"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full"></span>
+                    <span>{project} ({list.length})</span>
+                  </div>
+                  {isCollapsed ? (
+                    <ChevronRight className="w-3.5 h-3.5 text-indigo-400/70" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-indigo-400/70" />
+                  )}
+                </button>
+                {!isCollapsed && (
+                  <div className="space-y-2.5 pt-1">
+                    {list.map((v) => renderInstanceCard(v))}
+                  </div>
+                )}
               </div>
-              <div className="space-y-2.5">
-                {list.map((v) => renderInstanceCard(v))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       );
     }
@@ -1376,7 +1456,7 @@ dWxhLWhvc3QtbXVsdGk=
         </div>
 
         {/* Inst Directory with Organization Groups */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 backdrop-blur-md shadow-2xl space-y-4">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 backdrop-blur-md shadow-2xl space-y-4" id="services_directory">
           <div className="flex flex-col gap-3 pb-2 border-b border-slate-800/60">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold font-mono tracking-wide uppercase text-slate-400">VPS Pools</h3>
@@ -1409,6 +1489,26 @@ dWxhLWhvc3QtbXVsdGk=
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-950/70 border border-slate-850 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-indigo-400 text-slate-350 font-mono"
               />
+              {/* Group by Project Switch */}
+              <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850/60 rounded-lg p-2 font-sans">
+                <span className="text-[11px] font-mono text-slate-300 flex items-center gap-1.5 font-sans">
+                  <Database className="w-3.5 h-3.5 text-indigo-400" />
+                  Group by Project
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGroupBy(groupBy === "project" ? "none" : "project")}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    groupBy === "project" ? "bg-indigo-600" : "bg-slate-800"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-100 shadow ring-0 transition duration-200 ease-in-out ${
+                      groupBy === "project" ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
                 <div>
                   <label className="block text-[8px] text-slate-500 uppercase font-semibold mb-1">Project</label>
@@ -1508,7 +1608,7 @@ dWxhLWhvc3QtbXVsdGk=
                   title="Generate & download secure cryptographic key pair for this VPS"
                 >
                   <Key className="w-3.5 h-3.5" />
-                  SSH Keygen
+                  Generate SSH Keys
                 </button>
                 
                 {/* Task 5: Download Report controls */}
@@ -1653,14 +1753,45 @@ dWxhLWhvc3QtbXVsdGk=
                 </div>
               ) : (
                 /* Task 5: Hardware Diagnostics Panel */
-                <div className="bg-slate-950 rounded-xl border border-slate-855 p-5 flex flex-col min-h-[460px] justify-between gap-4" id="diagnostics_panel">
+                <div 
+                  className={`bg-slate-950 rounded-xl border p-5 flex flex-col min-h-[460px] justify-between gap-4 transition-all duration-500 relative ${
+                    selectedVps.alerts?.enabled && (cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) || ramUsage > (selectedVps.alerts?.ramThreshold ?? 90))
+                      ? "border-pink-500/80 shadow-[0_0_20px_rgba(244,63,94,0.25)] bg-slate-950/95"
+                      : "border-slate-855"
+                  }`}
+                  id="diagnostics_panel"
+                >
                   <div>
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-900 mb-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-900 mb-4 gap-2 flex-wrap">
                       <span className="text-xs font-bold font-mono tracking-wider uppercase text-cyan-400 flex items-center gap-2">
                         <Activity className="w-4 h-4 text-cyan-400 animate-pulse" /> HW Metric Diagnoses
                       </span>
-                      <span className="text-[10px] font-mono text-cyan-450 text-cyan-400 bg-cyan-950/40 border border-cyan-805 px-2 py-0.5 rounded-full animate-pulse">Live Feed</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={openAlertModal}
+                          className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-mono font-bold uppercase rounded bg-indigo-950/60 hover:bg-slate-900 border border-indigo-900/55 text-indigo-300 hover:text-white transition cursor-pointer"
+                        >
+                          <Sliders className="w-3 h-3" />
+                          Configure Threshold Alerts
+                        </button>
+                        <span className="text-[10px] font-mono text-cyan-450 text-cyan-400 bg-cyan-950/40 border border-cyan-805 px-2 py-0.5 rounded-full animate-pulse">Live Feed</span>
+                      </div>
                     </div>
+
+                    {/* Breach visual warning banner inside panel */}
+                    {selectedVps.alerts?.enabled && (cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) || ramUsage > (selectedVps.alerts?.ramThreshold ?? 90)) && (
+                      <div className="mb-4 bg-pink-955/30 border border-pink-500/40 rounded-lg p-2.5 flex items-center gap-2 animate-pulse">
+                        <ShieldAlert className="w-4 h-4 text-pink-500" />
+                        <div>
+                          <div className="text-[10px] uppercase font-mono font-bold text-pink-400">🚨 EXCEEDED MASTER THRESHOLD</div>
+                          <div className="text-[8px] font-mono text-slate-400">
+                            {cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) && `CPU utilization (${cpuUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.cpuThreshold}%. `}
+                            {ramUsage > (selectedVps.alerts?.ramThreshold ?? 90) && `RAM memory load (${ramUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.ramThreshold}%.`}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="space-y-4">
                       {/* CPU Utilization */}
@@ -2024,6 +2155,116 @@ dWxhLWhvc3QtbXVsdGk=
           </div>
         )}
       </div>
+      {/* Configure Threshold Alerts Modal Dialog */}
+      {isAlertModalOpen && selectedVps && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form 
+            onSubmit={saveAlertSettings}
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl relative font-sans animate-in fade-in zoom-in duration-150"
+          >
+            {/* Header */}
+            <div className="bg-slate-950 px-6 py-4 border-b border-slate-850 flex items-center justify-between">
+              <span className="text-xs font-bold font-mono tracking-wider uppercase text-pink-400 flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-pink-400" /> Threshold Configurations
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsAlertModalOpen(false)}
+                className="text-slate-500 hover:text-slate-350 cursor-pointer font-sans text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form Fields */}
+            <div className="p-6 space-y-4 font-sans">
+              <p className="text-[11px] text-slate-400 font-mono leading-relaxed">
+                Configure real-time hypervisor-level CPU and RAM telemetry notification hooks. Breaches will highlight warning zones and dispatch warnings.
+              </p>
+
+              {/* Toggle switch */}
+              <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850 p-2.5 rounded-lg font-sans">
+                <span className="text-xs font-mono text-slate-300">Status Alerting Actions</span>
+                <button
+                  type="button"
+                  onClick={() => setEditAlertEnabled(!editAlertEnabled)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    editAlertEnabled ? "bg-indigo-600" : "bg-slate-800"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
+                      editAlertEnabled ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* CPU load Limit */}
+              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                <div className="flex justify-between text-[11px] font-mono mb-1">
+                  <span className="text-slate-400">⚡ CPU Alert Limit:</span>
+                  <span className="text-pink-400 font-bold">{editCpuThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="95"
+                  value={editCpuThreshold}
+                  onChange={(e) => setEditCpuThreshold(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer"
+                />
+              </div>
+
+              {/* RAM utilization limit */}
+              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                <div className="flex justify-between text-[11px] font-mono mb-1">
+                  <span className="text-slate-400">🧠 RAM Memory Limit:</span>
+                  <span className="text-pink-400 font-bold">{editRamThreshold}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="95"
+                  value={editRamThreshold}
+                  onChange={(e) => setEditRamThreshold(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer"
+                />
+              </div>
+
+              {/* Target Notification Email */}
+              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono">Notification Receiver Email</label>
+                <input
+                  type="email"
+                  required={editAlertEnabled}
+                  placeholder="alerts@nebulahost.dev"
+                  value={editAlertEmail}
+                  onChange={(e) => setEditAlertEmail(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-850 rounded px-3 py-1.5 text-xs outline-none focus:border-indigo-400 text-slate-200 font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-950 px-6 py-4 border-t border-slate-855 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsAlertModalOpen(false)}
+                className="px-3.5 py-1.5 border border-slate-800 bg-transparent text-xs font-semibold text-slate-400 rounded-lg hover:text-white transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 bg-indigo-600 border border-indigo-550 text-white text-xs font-semibold rounded-lg hover:bg-indigo-500 transition shadow-md flex items-center gap-1 cursor-pointer"
+              >
+                Save Limits
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       </div>
       )}
     </div>
