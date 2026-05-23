@@ -40,6 +40,8 @@ export interface VPSInstance {
     ramThreshold: number;
     email: string;
     enabled: boolean;
+    alertType?: "Immediate" | "Delayed";
+    smartNotification?: boolean;
   };
   project?: string;
   tags?: string[];

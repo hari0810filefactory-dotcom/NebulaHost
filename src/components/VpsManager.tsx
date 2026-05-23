@@ -181,6 +181,9 @@ export default function VpsManager() {
       setEditRamThreshold(selectedVps.alerts?.ramThreshold ?? 80);
       setEditAlertEmail(selectedVps.alerts?.email ?? "root@nebulaHost.local");
       setEditAlertEnabled(selectedVps.alerts?.enabled ?? true);
+      setEditAlertType(selectedVps.alerts?.alertType ?? "Immediate");
+      setEditSmartNotification(selectedVps.alerts?.smartNotification ?? false);
+      setModalActiveTab("settings");
       setIsAlertModalOpen(true);
     }
   };
@@ -193,6 +196,8 @@ export default function VpsManager() {
       ramThreshold: editRamThreshold,
       email: editAlertEmail,
       enabled: editAlertEnabled,
+      alertType: editAlertType,
+      smartNotification: editSmartNotification,
     };
     const updatedVps = {
       ...selectedVps,
@@ -206,7 +211,7 @@ export default function VpsManager() {
       ...prev,
       `[MONITOR-CONFIG] ⚙️ Threshold alert profiles updated.`,
       `[MONITOR-CONFIG] CPU alert threshold: ${editCpuThreshold}% | RAM Memory alert threshold: ${editRamThreshold}%`,
-      `[MONITOR-CONFIG] Alerts: ${editAlertEnabled ? "ENABLED" : "DISABLED"} | Target notification queue: ${editAlertEmail}`
+      `[MONITOR-CONFIG] Alerts: ${editAlertEnabled ? "ENABLED" : "DISABLED"} | Mode: ${editAlertType} | Smart Adapt: ${editSmartNotification ? "ACTIVE" : "INACTIVE"} | Target notification queue: ${editAlertEmail}`
     ]);
   };
 
@@ -242,6 +247,12 @@ export default function VpsManager() {
   const [cpuUsage, setCpuUsage] = useState<number>(45.3);
   const [ramUsage, setRamUsage] = useState<number>(61.2);
   const [lastAlertTimes, setLastAlertTimes] = useState<{[key: string]: number}>({});
+  const [mutedServers, setMutedServers] = useState<{[key: string]: boolean}>({});
+  const [predictiveAlertServers, setPredictiveAlertServers] = useState<{[key: string]: boolean}>({});
+  const [editAlertType, setEditAlertType] = useState<"Immediate" | "Delayed">("Immediate");
+  const [editSmartNotification, setEditSmartNotification] = useState<boolean>(false);
+  const [modalActiveTab, setModalActiveTab] = useState<"settings" | "incidents">("settings");
+  const [breachTimeframe, setBreachTimeframe] = useState<"24h" | "7d">("24h");
 
   // Telemetry auto-refresh and frequency options
   const [isLiveRefreshEnabled, setIsLiveRefreshEnabled] = useState(true);
@@ -387,30 +398,180 @@ export default function VpsManager() {
     }, 5500);
   };
 
+  const toggleMuteServer = (serverId: string) => {
+    setMutedServers(prev => {
+      const nextVal = !prev[serverId];
+      setTerminalHistory(t => [
+        ...t,
+        `[MONITOR] ${nextVal ? "🤫 Notifications MUTED" : "🔔 Notifications UNMUTED"} for server ID [${serverId}]`
+      ]);
+      return { ...prev, [serverId]: nextVal };
+    });
+  };
+
+  const togglePredictiveServer = (serverId: string) => {
+    setPredictiveAlertServers(prev => {
+      const nextVal = !prev[serverId];
+      setTerminalHistory(t => [
+        ...t,
+        `[AI-ENGINE] ${nextVal ? "🤖 AI Predictive Alerting ENABLED" : "🚫 AI Predictive Alerting DISABLED"} for server ID [${serverId}]`
+      ]);
+      return { ...prev, [serverId]: nextVal };
+    });
+  };
+
+  const getBreachHistoryLast24h = (vpsId: string) => {
+    const seed = vpsId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const data: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      // Deterministic pseudo-random number of breaches per hour
+      const val = Math.max(0, Math.round(
+        Math.sin((i + seed) / 2.8) * 4 + 3 + (seed % 3)
+      ));
+      data.push(val);
+    }
+    return data;
+  };
+
+  const getBreachHistoryLast7Days = (vpsId: string) => {
+    const seed = vpsId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const days = [
+      { name: "Mon", count: Math.max(1, (seed % 7) + 2) },
+      { name: "Tue", count: Math.max(1, ((seed + 2) % 6) + 3) },
+      { name: "Wed", count: Math.max(1, ((seed + 4) % 8) + 1) },
+      { name: "Thu", count: Math.max(1, ((seed + 12) % 9) + 4) },
+      { name: "Fri", count: Math.max(1, ((seed + 20) % 5) + 6) },
+      { name: "Sat", count: Math.max(1, ((seed + 5) % 8) + 2) },
+      { name: "Sun", count: Math.max(1, ((seed + 15) % 6) + 1) },
+    ];
+    return days;
+  };
+
+  const getIncidentHistory = (vpsId: string) => {
+    const seed = vpsId.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return [
+      {
+        timestamp: "2026-05-23 04:12:35 UTC",
+        metric: "CPU",
+        peak: `${Math.round(85 + (seed % 10))}.4%`,
+        status: "Auto-restarted microservices container successfully"
+      },
+      {
+        timestamp: "2026-05-22 18:45:11 UTC",
+        metric: "RAM",
+        peak: `${Math.round(88 + (seed % 7))}.2%`,
+        status: "Mitigated by clearing cached slab memory"
+      },
+      {
+        timestamp: "2026-05-21 21:05:00 UTC",
+        metric: "CPU",
+        peak: `${Math.round(91 + (seed % 5))}.6%`,
+        status: "Resolved - transient load spike ended"
+      },
+      {
+         timestamp: "2026-05-20 11:22:45 UTC",
+         metric: "RAM",
+         peak: `${Math.round(84 + (seed % 9))}.5%`,
+         status: "Investigated - manual release of Node daemon process threads"
+      }
+    ];
+  };
+
+  const getActiveThresholds = (vps: any) => {
+    const cpuRaw = vps.alerts?.cpuThreshold ?? 80;
+    const ramRaw = vps.alerts?.ramThreshold ?? 80;
+    if (!vps.alerts?.smartNotification) {
+      return { cpu: cpuRaw, ram: ramRaw, isSmartAdjusted: false, originalCpu: cpuRaw, originalRam: ramRaw };
+    }
+    const hr = new Date().getHours();
+    const isPeakHour = hr >= 9 && hr <= 18;
+    const cpu = isPeakHour ? Math.min(95, cpuRaw + 8) : Math.max(15, cpuRaw - 7);
+    const ram = isPeakHour ? Math.min(95, ramRaw + 5) : Math.max(15, ramRaw - 5);
+    return {
+      cpu,
+      ram,
+      isSmartAdjusted: true,
+      originalCpu: cpuRaw,
+      originalRam: ramRaw,
+      isPeakHour
+    };
+  };
+
   // Monitor alert thresholds
   useEffect(() => {
     if (!selectedVps || !selectedVps.alerts?.enabled) return;
-    const { cpuThreshold, ramThreshold, email } = selectedVps.alerts;
+    const activeThresholds = getActiveThresholds(selectedVps);
+    const cpuThreshold = activeThresholds.cpu;
+    const ramThreshold = activeThresholds.ram;
+    const { email } = selectedVps.alerts;
     if (!email) return;
 
     const now = Date.now();
+    const isMuted = mutedServers[selectedVps.id] || false;
+    const isPredictiveEnabled = predictiveAlertServers[selectedVps.id] ?? true;
 
+    // 1. CPU Alerts
     if (cpuUsage > cpuThreshold) {
-      const last = lastAlertTimes[`${selectedVps.id}-cpu`] || 0;
-      if (now - last > 45000) { // 45 seconds cooldown
-        setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-cpu`]: now }));
-        triggerSimulatedEmailAlert(selectedVps, "CPU Overload Warning", cpuUsage, cpuThreshold, email);
+      if (isMuted) {
+        const lastMuted = lastAlertTimes[`${selectedVps.id}-cpu-muted`] || 0;
+        if (now - lastMuted > 45000) {
+          setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-cpu-muted`]: now }));
+          setTerminalHistory(prev => [
+            ...prev,
+            `[SYSTEM-MONITOR] 🤫 BREACH DETECTED: CPU utilization is at ${cpuUsage.toFixed(1)}% (Threshold: ${cpuThreshold}%), but alerts are muted.`
+          ]);
+        }
+      } else {
+        const last = lastAlertTimes[`${selectedVps.id}-cpu`] || 0;
+        if (now - last > 45000) { // 45 seconds cooldown
+          setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-cpu`]: now }));
+          triggerSimulatedEmailAlert(selectedVps, "CPU Overload Warning", cpuUsage, cpuThreshold, email);
+        }
+      }
+    } else if (isPredictiveEnabled && cpuUsage > cpuThreshold - 15) {
+      // Predictive warning trend
+      const lastPred = lastAlertTimes[`${selectedVps.id}-cpu-pred`] || 0;
+      if (now - lastPred > 60000) {
+        setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-cpu-pred`]: now }));
+        const projectedValue = +(cpuUsage + Math.random() * 8 + 4).toFixed(1);
+        setTerminalHistory(prev => [
+          ...prev,
+          `[AI-PREDICTIVE-ENGINE] 🤖 CPU alert projection: CPU load is rising rapidly on ${selectedVps.name}. Projected to reach ${projectedValue}% in 180s (Threshold: ${cpuThreshold}%).`
+        ]);
       }
     }
 
+    // 2. RAM Alerts
     if (ramUsage > ramThreshold) {
-      const last = lastAlertTimes[`${selectedVps.id}-ram`] || 0;
-      if (now - last > 45000) { // 45 seconds cooldown
-        setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-ram`]: now }));
-        triggerSimulatedEmailAlert(selectedVps, "RAM Capacity Alarm", ramUsage, ramThreshold, email);
+      if (isMuted) {
+        const lastMuted = lastAlertTimes[`${selectedVps.id}-ram-muted`] || 0;
+        if (now - lastMuted > 45000) {
+          setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-ram-muted`]: now }));
+          setTerminalHistory(prev => [
+            ...prev,
+            `[SYSTEM-MONITOR] 🤫 BREACH DETECTED: RAM usage is at ${ramUsage.toFixed(1)}% (Threshold: ${ramThreshold}%), but alerts are muted.`
+          ]);
+        }
+      } else {
+        const last = lastAlertTimes[`${selectedVps.id}-ram`] || 0;
+        if (now - last > 45000) { // 45 seconds cooldown
+          setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-ram`]: now }));
+          triggerSimulatedEmailAlert(selectedVps, "RAM Capacity Alarm", ramUsage, ramThreshold, email);
+        }
+      }
+    } else if (isPredictiveEnabled && ramUsage > ramThreshold - 15) {
+      // Predictive warning trend
+      const lastPred = lastAlertTimes[`${selectedVps.id}-ram-pred`] || 0;
+      if (now - lastPred > 60000) {
+        setLastAlertTimes(prev => ({ ...prev, [`${selectedVps.id}-ram-pred`]: now }));
+        const projectedValue = +(ramUsage + Math.random() * 5 + 2).toFixed(1);
+        setTerminalHistory(prev => [
+          ...prev,
+          `[AI-PREDICTIVE-ENGINE] 🤖 RAM alert projection: Memory allocation matches a growth pattern on ${selectedVps.name}. Projected: ${projectedValue}% in 150s (Threshold: ${ramThreshold}%).`
+        ]);
       }
     }
-  }, [cpuUsage, ramUsage, selectedVps, lastAlertTimes]);
+  }, [cpuUsage, ramUsage, selectedVps, lastAlertTimes, mutedServers, predictiveAlertServers]);
 
   // Alert simulation states
   const [testAlertToast, setTestAlertToast] = useState<{ vpsName: string; type: string; value: number; email: string } | null>(null);
@@ -510,13 +671,15 @@ export default function VpsManager() {
     ]);
   };
 
-  const handleAlertChange = (field: "cpuThreshold" | "ramThreshold" | "email", value: any) => {
+  const handleAlertChange = (field: "cpuThreshold" | "ramThreshold" | "email" | "alertType" | "smartNotification", value: any) => {
     if (!selectedVps) return;
     const updatedAlerts = {
       cpuThreshold: selectedVps.alerts?.cpuThreshold ?? 80,
       ramThreshold: selectedVps.alerts?.ramThreshold ?? 80,
       email: selectedVps.alerts?.email ?? "",
       enabled: selectedVps.alerts?.enabled ?? true,
+      alertType: selectedVps.alerts?.alertType ?? "Immediate",
+      smartNotification: selectedVps.alerts?.smartNotification ?? false,
       [field]: value
     };
     const updated = {
@@ -2028,51 +2191,109 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                         )}
 
                         <div className="space-y-4">
-                          {/* CPU Utilization */}
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between items-center text-xs font-mono">
-                              <span className="text-slate-400">⚡ CPU Utilization</span>
-                              <span className={`font-bold ${cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{cpuUsage.toFixed(1)}%</span>
-                            </div>
-                            <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                              <div 
-                                className={`h-full transition-all duration-1000 ${
-                                  cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-505"
-                                }`} 
-                                style={{ width: `${cpuUsage}%` }}
-                              ></div>
-                              {selectedVps.alerts?.enabled && (
-                                <div 
-                                  className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
-                                  style={{ left: `${selectedVps.alerts.cpuThreshold}%` }}
-                                  title={`CPU Alert Threshold: ${selectedVps.alerts.cpuThreshold}%`}
-                                ></div>
-                              )}
-                            </div>
-                          </div>
+                                   {/* CPU Utilization */}
+                          {(() => {
+                            const active = getActiveThresholds(selectedVps);
+                            const thresh = active.cpu;
+                            const isViolated = cpuUsage > thresh;
+                            return (
+                              <div className="space-y-1.5 animate-in fade-in duration-300">
+                                <div className="flex justify-between items-center text-xs font-mono">
+                                  <span className="text-slate-400 flex items-center gap-1.5">
+                                    ⚡ CPU Utilization
+                                    {active.isSmartAdjusted && (
+                                      <span className="text-[8px] bg-indigo-950/85 border border-indigo-700 text-indigo-300 px-1 py-0.2 rounded font-mono font-bold uppercase animate-pulse">🤖 smart</span>
+                                    )}
+                                  </span>
+                                  <div className="space-x-1.5 flex items-center">
+                                    <span className={`font-bold ${isViolated ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>
+                                      {cpuUsage.toFixed(1)}%
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 font-semibold">
+                                      (Limit: {thresh}% {active.isSmartAdjusted && `[base ${active.originalCpu}%]`})
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="relative w-full bg-slate-900 h-3 rounded-full overflow-hidden border border-slate-850">
+                                  {/* Danger Zone background fill element */}
+                                  {selectedVps.alerts?.enabled && (
+                                    <div 
+                                      className="absolute top-0 bottom-0 bg-pink-955/20 border-l border-pink-500/40"
+                                      style={{ left: `${thresh}%`, right: 0 }}
+                                      title={`Danger trigger zone starts at ${thresh}%`}
+                                    >
+                                      <div className="w-full h-full opacity-20 bg-[linear-gradient(45deg,rgba(244,63,94,0.15)_25%,transparent_25%,transparent_50%,rgba(244,63,94,0.15)_50%,rgba(244,63,94,0.15)_75%,transparent_75%,transparent)] bg-[length:6px_6px]"></div>
+                                    </div>
+                                  )}
+                                  <div 
+                                    className={`h-full transition-all duration-1000 ${
+                                      isViolated ? "bg-gradient-to-r from-pink-500 to-rose-600 animate-pulse" : "bg-gradient-to-r from-indigo-500 to-indigo-600"
+                                    }`} 
+                                    style={{ width: `${cpuUsage}%` }}
+                                  ></div>
+                                  {selectedVps.alerts?.enabled && (
+                                    <div 
+                                      className="absolute top-0 bottom-0 w-[2px] bg-pink-400"
+                                      style={{ left: `${thresh}%` }}
+                                      title={`Active Alert Limit: ${thresh}%`}
+                                    ></div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* RAM Memory Utilization */}
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between items-center text-xs font-mono">
-                              <span className="text-slate-400">🧠 RAM Memory Utilization</span>
-                              <span className={`font-bold ${ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{ramUsage.toFixed(1)}%</span>
-                            </div>
-                            <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                              <div 
-                                className={`h-full transition-all duration-1000 ${
-                                  ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-505"
-                                }`} 
-                                style={{ width: `${ramUsage}%` }}
-                              ></div>
-                              {selectedVps.alerts?.enabled && (
-                                <div 
-                                  className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
-                                  style={{ left: `${selectedVps.alerts.ramThreshold}%` }}
-                                  title={`RAM Alert Threshold: ${selectedVps.alerts.ramThreshold}%`}
-                                ></div>
-                              )}
-                            </div>
-                          </div>
+                          {(() => {
+                            const active = getActiveThresholds(selectedVps);
+                            const thresh = active.ram;
+                            const isViolated = ramUsage > thresh;
+                            return (
+                              <div className="space-y-1.5 animate-in fade-in duration-300">
+                                <div className="flex justify-between items-center text-xs font-mono">
+                                  <span className="text-slate-400 flex items-center gap-1.5">
+                                    🧠 RAM Memory Utilization
+                                    {active.isSmartAdjusted && (
+                                      <span className="text-[8px] bg-indigo-950/85 border border-indigo-700 text-indigo-300 px-1 py-0.2 rounded font-mono font-bold uppercase animate-pulse">🤖 smart</span>
+                                    )}
+                                  </span>
+                                  <div className="space-x-1.5 flex items-center">
+                                    <span className={`font-bold ${isViolated ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>
+                                      {ramUsage.toFixed(1)}%
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 font-semibold">
+                                      (Limit: {thresh}% {active.isSmartAdjusted && `[base ${active.originalRam}%]`})
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="relative w-full bg-slate-900 h-3 rounded-full overflow-hidden border border-slate-850">
+                                  {/* Danger Zone background fill element */}
+                                  {selectedVps.alerts?.enabled && (
+                                    <div 
+                                      className="absolute top-0 bottom-0 bg-pink-955/20 border-l border-pink-500/40"
+                                      style={{ left: `${thresh}%`, right: 0 }}
+                                      title={`Danger trigger zone starts at ${thresh}%`}
+                                    >
+                                      <div className="w-full h-full opacity-20 bg-[linear-gradient(45deg,rgba(244,63,94,0.15)_25%,transparent_25%,transparent_50%,rgba(244,63,94,0.15)_50%,rgba(244,63,94,0.15)_75%,transparent_75%,transparent)] bg-[length:6px_6px]"></div>
+                                    </div>
+                                  )}
+                                  <div 
+                                    className={`h-full transition-all duration-1000 ${
+                                      isViolated ? "bg-gradient-to-r from-pink-500 to-rose-600 animate-pulse" : "bg-gradient-to-r from-indigo-500 to-indigo-600"
+                                    }`} 
+                                    style={{ width: `${ramUsage}%` }}
+                                  ></div>
+                                  {selectedVps.alerts?.enabled && (
+                                    <div 
+                                      className="absolute top-0 bottom-0 w-[2px] bg-pink-400"
+                                      style={{ left: `${thresh}%` }}
+                                      title={`Active Alert Limit: ${thresh}%`}
+                                    ></div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Disk Read Throughput */}
                           <div className="space-y-1.5">
@@ -2116,6 +2337,163 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                             <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-853">
                               <div className="bg-pink-500 h-full transition-all duration-1000" style={{ width: `${Math.min((netTx / 500) * 100, 100)}%` }}></div>
                             </div>
+                          </div>
+                        </div>
+
+                        {/* Custom Alerts Setting & 24hr Breach Pattern panel */}
+                        <div id="diagnostics_alerts_subset" className="bg-slate-900/40 p-3.5 rounded-lg border border-slate-850 space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                            <span className="text-[9px] font-mono text-cyan-400 uppercase tracking-widest font-bold flex items-center gap-1">
+                              <ShieldAlert className="w-3" /> Alert Controls & 24h Breaches
+                            </span>
+                            <span className="text-[9px] font-mono text-slate-500 font-bold">
+                              Threshold: CPU {selectedVps.alerts?.cpuThreshold ?? 80}% | RAM {selectedVps.alerts?.ramThreshold ?? 80}%
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-sans">
+                            {/* Mute Notifications Toggle */}
+                            <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-slate-850">
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-mono text-slate-300 font-bold">Mute Email</span>
+                                <span className="text-[8px] font-mono text-slate-500">Hold notifications</span>
+                              </div>
+                              <button
+                                type="button"
+                                id="toggle_mute_button"
+                                onClick={() => toggleMuteServer(selectedVps.id)}
+                                className={`relative inline-flex h-4.5 w-8.5 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  mutedServers[selectedVps.id] ? "bg-pink-600" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
+                                    mutedServers[selectedVps.id] ? "translate-x-4" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            {/* Predictive AI Alert Toggle */}
+                            <div className="flex items-center justify-between bg-slate-950 p-2 rounded border border-slate-850">
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-mono text-indigo-300 font-bold flex items-center gap-0.5">🤖 AI Predictive</span>
+                                <span className="text-[8px] font-mono text-slate-500">Breach pro-active alerts</span>
+                              </div>
+                              <button
+                                type="button"
+                                id="toggle_predictive_button"
+                                onClick={() => togglePredictiveServer(selectedVps.id)}
+                                className={`relative inline-flex h-4.5 w-8.5 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  (predictiveAlertServers[selectedVps.id] ?? true) ? "bg-indigo-600" : "bg-slate-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
+                                    (predictiveAlertServers[selectedVps.id] ?? true) ? "translate-x-4" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Histogram & 7-Day Trend segment */}
+                          <div id="diagnostics_breach_histogram" className="space-y-2 pt-1">
+                            <div className="flex justify-between items-center text-[9px] font-mono border-b border-slate-800 pb-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setBreachTimeframe("24h")}
+                                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase transition cursor-pointer ${
+                                    breachTimeframe === "24h" 
+                                      ? "bg-slate-950 text-indigo-400 border border-indigo-900/60" 
+                                      : "text-slate-500 hover:text-slate-300"
+                                  }`}
+                                >
+                                  📊 24h Histogram
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBreachTimeframe("7d")}
+                                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase transition cursor-pointer ${
+                                    breachTimeframe === "7d" 
+                                      ? "bg-slate-950 text-indigo-400 border border-indigo-900/60" 
+                                      : "text-slate-500 hover:text-slate-300"
+                                  }`}
+                                >
+                                  📈 7d Breach Trend
+                                </button>
+                              </div>
+                              <span className="text-pink-400 font-bold">
+                                {breachTimeframe === "24h" 
+                                  ? `${getBreachHistoryLast24h(selectedVps.id).reduce((sum, val) => sum + val, 0)} spikes`
+                                  : `${getBreachHistoryLast7Days(selectedVps.id).reduce((sum, val) => sum + val.count, 0)} total incidents`
+                                }
+                              </span>
+                            </div>
+
+                            {breachTimeframe === "24h" ? (
+                              <>
+                                <div className="h-11 flex items-end gap-1 px-2.5 bg-slate-950 rounded border border-slate-850/80 pt-3 pb-1 justify-between select-none">
+                                  {getBreachHistoryLast24h(selectedVps.id).map((val, idx) => {
+                                    const maxVal = Math.max(...getBreachHistoryLast24h(selectedVps.id), 1);
+                                    const pct = (val / maxVal) * 100;
+                                    const heightStyle = val === 0 ? "15%" : `${Math.max(25, pct)}%`;
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`w-2.5 rounded-t-sm transition-all duration-300 relative group cursor-pointer ${
+                                          val === 0 ? "bg-slate-850 hover:bg-slate-800" :
+                                          val > 6 ? "bg-pink-500 hover:bg-pink-400 animate-pulse" : "bg-indigo-500 hover:bg-indigo-400"
+                                        }`}
+                                        style={{ height: heightStyle }}
+                                      >
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-950 border border-slate-800 text-[8px] font-mono px-1.5 py-0.5 rounded text-white whitespace-nowrap z-30 pointer-events-none shadow-xl border-slate-700">
+                                          Hour -{24 - idx}h: {val} breaches
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="flex justify-between text-[7px] font-mono text-slate-500 px-1">
+                                  <span>-24 Hours Ago</span>
+                                  <span>Current Node Interval Peak</span>
+                                  <span>Now</span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="h-11 flex items-end gap-1.5 px-3 bg-slate-950 rounded border border-slate-850/80 pt-3 pb-1 justify-between select-none">
+                                  {getBreachHistoryLast7Days(selectedVps.id).map((day, idx) => {
+                                    const maxVal = Math.max(...getBreachHistoryLast7Days(selectedVps.id).map(d => d.count), 1);
+                                    const pct = (day.count / maxVal) * 100;
+                                    const heightStyle = `${Math.max(25, pct)}%`;
+                                    return (
+                                      <div
+                                        key={day.name}
+                                        className="flex-1 flex flex-col justify-end items-center h-full relative group cursor-pointer"
+                                      >
+                                        <div
+                                          className={`w-full rounded-t-sm transition-all duration-300 ${
+                                            day.count > 10 ? "bg-rose-500 hover:bg-rose-400 animate-pulse" :
+                                            day.count > 6 ? "bg-pink-500 hover:bg-pink-400" : "bg-indigo-500 hover:bg-indigo-400"
+                                          }`}
+                                          style={{ height: heightStyle }}
+                                        />
+                                        <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-950 border border-slate-800 text-[8px] font-mono px-1.5 py-0.5 rounded text-white whitespace-nowrap z-30 pointer-events-none shadow-xl border-slate-700">
+                                          {day.name}: {day.count} limit breaches
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                                <div className="flex justify-between text-[7px] font-mono text-slate-500 px-1">
+                                  {getBreachHistoryLast7Days(selectedVps.id).map(day => (
+                                    <span key={day.name} className="uppercase font-semibold">{day.name}</span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -2435,7 +2813,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
 
                     <div>
                       <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono">Notification Receiver Email</label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 mb-3">
                         <input
                           type="email"
                           placeholder="ops-manager@nebulahost.dev"
@@ -2453,6 +2831,19 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                           <Mail className="w-3.5 h-3.5 text-pink-400 animate-bounce" /> Test
                         </button>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono">Alert Notification Type</label>
+                      <select
+                        value={selectedVps.alerts?.alertType ?? "Immediate"}
+                        disabled={!selectedVps.alerts?.enabled}
+                        onChange={(e) => handleAlertChange("alertType", e.target.value as "Immediate" | "Delayed")}
+                        className="w-full bg-slate-900 border border-slate-850 rounded px-2.5 py-1 text-xs outline-none focus:border-indigo-400 text-slate-200 font-mono disabled:opacity-30 cursor-pointer"
+                      >
+                        <option value="Immediate">Immediate (Instantly dispatch notification)</option>
+                        <option value="Delayed">Delayed (Debounce minor spikes, wait 60s)</option>
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -2644,75 +3035,170 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
               </button>
             </div>
 
-            {/* Form Fields */}
-            <div className="p-6 space-y-4 font-sans">
-              <p className="text-[11px] text-slate-400 font-mono leading-relaxed">
-                Configure real-time hypervisor-level CPU and RAM telemetry notification hooks. Breaches will highlight warning zones and dispatch warnings.
-              </p>
-
-              {/* Toggle switch */}
-              <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850 p-2.5 rounded-lg font-sans">
-                <span className="text-xs font-mono text-slate-300">Status Alerting Actions</span>
-                <button
-                  type="button"
-                  onClick={() => setEditAlertEnabled(!editAlertEnabled)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    editAlertEnabled ? "bg-indigo-600" : "bg-slate-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
-                      editAlertEnabled ? "translate-x-4" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* CPU load Limit */}
-              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
-                <div className="flex justify-between text-[11px] font-mono mb-1">
-                  <span className="text-slate-400">⚡ CPU Alert Limit:</span>
-                  <span className="text-pink-400 font-bold">{editCpuThreshold}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="95"
-                  value={editCpuThreshold}
-                  onChange={(e) => setEditCpuThreshold(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer"
-                />
-              </div>
-
-              {/* RAM utilization limit */}
-              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
-                <div className="flex justify-between text-[11px] font-mono mb-1">
-                  <span className="text-slate-400">🧠 RAM Memory Limit:</span>
-                  <span className="text-pink-400 font-bold">{editRamThreshold}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="95"
-                  value={editRamThreshold}
-                  onChange={(e) => setEditRamThreshold(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer"
-                />
-              </div>
-
-              {/* Target Notification Email */}
-              <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
-                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono">Notification Receiver Email</label>
-                <input
-                  type="email"
-                  required={editAlertEnabled}
-                  placeholder="alerts@nebulahost.dev"
-                  value={editAlertEmail}
-                  onChange={(e) => setEditAlertEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded px-3 py-1.5 text-xs outline-none focus:border-indigo-400 text-slate-200 font-mono"
-                />
-              </div>
+            {/* Modal Tabs Switching Bar */}
+            <div className="flex border-b border-slate-850 bg-slate-950 px-6 pt-1">
+              <button
+                type="button"
+                onClick={() => setModalActiveTab("settings")}
+                className={`py-2 px-3 text-[10px] font-mono font-bold border-b-2 uppercase tracking-wide transition-all duration-200 cursor-pointer ${
+                  modalActiveTab === "settings" 
+                    ? "border-pink-500 text-pink-400 font-extrabold" 
+                    : "border-transparent text-slate-500 hover:text-slate-355"
+                }`}
+              >
+                ⚙️ Configs
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalActiveTab("incidents")}
+                className={`py-2 px-3 text-[10px] font-mono font-bold border-b-2 uppercase tracking-wide transition-all duration-200 cursor-pointer ${
+                  modalActiveTab === "incidents" 
+                    ? "border-pink-500 text-pink-400 font-extrabold" 
+                    : "border-transparent text-slate-500 hover:text-slate-355"
+                }`}
+              >
+                📜 Incident History ({getIncidentHistory(selectedVps.id).length})
+              </button>
             </div>
+
+            {modalActiveTab === "settings" ? (
+              /* Form Fields */
+              <div className="p-6 space-y-4 font-sans max-h-[340px] overflow-y-auto">
+                <p className="text-[11px] text-slate-400 font-mono leading-relaxed">
+                  Configure real-time hypervisor-level CPU and RAM telemetry notification hooks. Breaches will highlight warning zones and dispatch warnings.
+                </p>
+
+                {/* Toggle switch */}
+                <div className="flex items-center justify-between bg-slate-950/40 border border-slate-850 p-2.5 rounded-lg font-sans">
+                  <span className="text-xs font-mono text-slate-300">Status Alerting Actions</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditAlertEnabled(!editAlertEnabled)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        editAlertEnabled ? "bg-indigo-600" : "bg-slate-800"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-slate-950 shadow ring-0 transition duration-200 ease-in-out ${
+                        editAlertEnabled ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* CPU load Limit */}
+                <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                  <div className="flex justify-between text-[11px] font-mono mb-1">
+                    <span className="text-slate-400">⚡ CPU Alert Limit:</span>
+                    <span className="text-pink-400 font-bold">{editCpuThreshold}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="95"
+                    value={editCpuThreshold}
+                    onChange={(e) => setEditCpuThreshold(parseInt(e.target.value))}
+                    className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer cursor-ew-resize"
+                  />
+                </div>
+
+                {/* RAM utilization limit */}
+                <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                  <div className="flex justify-between text-[11px] font-mono mb-1">
+                    <span className="text-slate-400">🧠 RAM Memory Limit:</span>
+                    <span className="text-pink-400 font-bold">{editRamThreshold}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="95"
+                    value={editRamThreshold}
+                    onChange={(e) => setEditRamThreshold(parseInt(e.target.value))}
+                    className="w-full h-1 bg-slate-950 rounded accent-pink-400 cursor-pointer cursor-ew-resize"
+                  />
+                </div>
+
+                {/* Target Notification Email */}
+                <div className={editAlertEnabled ? "opacity-100" : "opacity-40 pointer-events-none"}>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono">Notification Receiver Email</label>
+                  <input
+                    type="email"
+                    required={editAlertEnabled}
+                    placeholder="alerts@nebulahost.dev"
+                    value={editAlertEmail}
+                    onChange={(e) => setEditAlertEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded px-3 py-1.5 text-xs outline-none focus:border-indigo-400 text-slate-200 font-mono"
+                  />
+                </div>
+
+                {/* Alert Notification Type dropdown */}
+                <div className={editAlertEnabled ? "opacity-100 animate-in fade-in" : "opacity-40 pointer-events-none"}>
+                  <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1 font-mono font-bold">Alert Notification Type</label>
+                  <select
+                    value={editAlertType}
+                    onChange={(e) => setEditAlertType(e.target.value as "Immediate" | "Delayed")}
+                    className="w-full bg-slate-950 border border-slate-850 rounded px-3 py-1.5 text-xs outline-none focus:border-indigo-400 text-slate-200 font-mono cursor-pointer"
+                  >
+                    <option value="Immediate">Immediate (Instantly dispatch notification)</option>
+                    <option value="Delayed">Delayed (Debounce minor spikes, wait 60s)</option>
+                  </select>
+                </div>
+
+                {/* Smart Adaptive Sensitivity Toggle */}
+                <div className={editAlertEnabled ? "opacity-100 animate-in fade-in" : "opacity-40 pointer-events-none"}>
+                  <div className="flex items-center justify-between bg-slate-950/50 border border-slate-850 p-3 rounded-lg flex-row gap-2">
+                    <div className="flex flex-col mr-2">
+                      <span className="text-[10px] font-bold font-mono text-indigo-300 flex items-center gap-1 font-extrabold">🤖 Adaptive Smart Alerts</span>
+                      <span className="text-[8px] font-mono text-slate-500 leading-normal">
+                        Adjust alert limits (+8% workpeak buffer hours 09-18, -7% off-peak hours) safely mapping simulated workloads.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditSmartNotification(!editSmartNotification)}
+                      className={`relative inline-flex h-4.5 w-8.5 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        editSmartNotification ? "bg-indigo-600" : "bg-slate-800"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-slate-950 shadow ring-0 transition duration-205 ease-in-out ${
+                          editSmartNotification ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Incident History Logs */
+              <div className="p-6 space-y-3 font-sans max-h-[340px] overflow-y-auto">
+                <div className="flex flex-col mb-1 pb-1">
+                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">Past Threshold Breaches Log</span>
+                  <p className="text-[8px] font-mono text-slate-500 italic leading-snug">
+                    Chronological telemetry alert history matching current server metadata.
+                  </p>
+                </div>
+
+                <div className="space-y-2.5">
+                  {getIncidentHistory(selectedVps.id).map((incident, i) => (
+                    <div key={i} className="bg-slate-950/80 border border-slate-850/60 p-3 rounded-lg flex flex-col gap-1 text-[10px] font-mono leading-relaxed">
+                      <div className="flex justify-between items-center border-b border-slate-850/60 pb-1 mb-1">
+                        <span className="text-pink-400 font-bold flex items-center gap-1">🚨 Trigger: {incident.metric} Limit Exceeded</span>
+                        <span className="text-slate-500 text-[8px]">{incident.timestamp}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-400">
+                        <span>Incident peak limit:</span>
+                        <span className="font-bold text-slate-200">{incident.peak}</span>
+                      </div>
+                      <div className="mt-1 text-slate-500 flex gap-1 items-center">
+                        <span className="text-indigo-400">✓</span>
+                        <span className="text-[8.5px] text-indigo-300 font-medium italic">{incident.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Footer */}
             <div className="bg-slate-950 px-6 py-4 border-t border-slate-855 flex items-center justify-end gap-2.5">
