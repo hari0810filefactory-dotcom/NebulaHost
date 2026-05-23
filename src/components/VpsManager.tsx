@@ -1956,7 +1956,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
 
                           {/* Export Diagnostics button */}
                           <div className="flex items-center bg-slate-905 bg-slate-900 border border-slate-800 rounded py-0.5 text-[10px] font-mono px-1">
-                            <span className="text-[9px] text-slate-500 font-semibold px-2">Export Log:</span>
+                            <span className="text-[9px] text-slate-500 font-semibold px-2">Export Diagnostics:</span>
                             <button
                               type="button"
                               onClick={() => downloadTelemetryReport("json")}
@@ -2137,7 +2137,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                               disabled={isProcessingAction !== null}
                               className="flex-1 min-w-[95px] text-center px-2 py-1.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-950 hover:bg-slate-900 border border-slate-800 text-indigo-300 hover:text-white transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
                             >
-                              {isProcessingAction === "services" ? <RotateCw className="w-3 h-3 animate-spin text-cyan-400" /> : "⚡ Restart Svcs"}
+                              {isProcessingAction === "services" ? <RotateCw className="w-3 h-3 animate-spin text-cyan-400" /> : "⚡ Restart Services"}
                             </button>
                             <button
                               type="button"
@@ -2145,7 +2145,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                               disabled={isProcessingAction !== null}
                               className="flex-1 min-w-[95px] text-center px-2 py-1.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-950 hover:bg-slate-900 border border-slate-800 text-pink-300 hover:text-white transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
                             >
-                              {isProcessingAction === "temp" ? <RotateCw className="w-3 h-3 animate-spin text-pink-400" /> : "🗑️ Wipe Temp"}
+                              {isProcessingAction === "temp" ? <RotateCw className="w-3 h-3 animate-spin text-pink-400" /> : "🗑️ Clear Temp Files"}
                             </button>
                           </div>
                           {diagnosticsLog && (
@@ -2376,7 +2376,8 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
               )}
 
               {/* Sidebar Config segment (Alerts, Firewall & Backups) */}
-              <div className="space-y-6">
+              {!(activeDetailTab === "diagnostics" && isDiagnosticsMaximized) && (
+                <div className="space-y-6">
                 
                 {/* Task 4: Custom CPU & RAM Threshold alerts configuration */}
                 <div className="bg-slate-950 rounded-xl border border-slate-850 p-4 space-y-4">
@@ -2615,6 +2616,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
                 </div>
 
               </div>
+              )}
 
             </div>
 
