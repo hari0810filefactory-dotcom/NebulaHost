@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Server, Cpu, Play, Square, RotateCw, Shield, Database, Terminal, ShieldAlert, Wifi, Globe, Trash2, Plus, CornerDownRight, Key, Mail, Activity, Download, Settings, Layers, Clock, Sliders, Calendar, TrendingUp, ChevronDown, ChevronRight } from "lucide-react";
+import { Server, Cpu, Play, Square, RotateCw, Shield, Database, Terminal, ShieldAlert, Wifi, Globe, Trash2, Plus, CornerDownRight, Key, Mail, Activity, Download, Settings, Layers, Clock, Sliders, Calendar, TrendingUp, ChevronDown, ChevronRight, Maximize2, Minimize2 } from "lucide-react";
 import { VPSInstance } from "../types";
 
 const INITIAL_VPS: VPSInstance[] = [
@@ -243,6 +243,45 @@ export default function VpsManager() {
   const [ramUsage, setRamUsage] = useState<number>(61.2);
   const [lastAlertTimes, setLastAlertTimes] = useState<{[key: string]: number}>({});
 
+  // Telemetry auto-refresh and frequency options
+  const [isLiveRefreshEnabled, setIsLiveRefreshEnabled] = useState(true);
+  const [refreshFrequency, setRefreshFrequency] = useState(3000); // 1000, 3000, 5000 (1s, 3s, 5s)
+
+  // Maximize diagnostics state
+  const [isDiagnosticsMaximized, setIsDiagnosticsMaximized] = useState(false);
+
+  // Quick action processing feeds
+  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null);
+  const [diagnosticsLog, setDiagnosticsLog] = useState<string>("All hardware checks passing. Hypervisor operating healthy.");
+
+  // Metric historic timeseries data mapping last 30 minutes
+  interface TelemetryDataPoint {
+    timestamp: string;
+    cpu: number;
+    ram: number;
+    diskRead: number;
+    diskWrite: number;
+  }
+  const [telemetryHistoryLog, setTelemetryHistoryLog] = useState<TelemetryDataPoint[]>([]);
+  const [selectedChartType, setSelectedChartType] = useState<"all" | "cpu" | "ram" | "disk">("all");
+
+  const generateTelemetryHistory = (vpsName: string) => {
+    const historicalPoints: TelemetryDataPoint[] = [];
+    const now = Date.now();
+    for (let i = 30; i >= 0; i--) {
+      const timeOffset = i * 60 * 1000; // 30 mins ago to now, step by 1 min
+      const logTime = new Date(now - timeOffset).toISOString();
+      historicalPoints.push({
+        timestamp: logTime,
+        cpu: +(Math.floor(Math.random() * 25) + 30 + Math.sin(i / 5) * 10).toFixed(1),
+        ram: +(Math.floor(Math.random() * 15) + 45 + Math.cos(i / 10) * 5).toFixed(1),
+        diskRead: +(Math.floor(Math.random() * 15) + 5).toFixed(1),
+        diskWrite: +(Math.floor(Math.random() * 8) + 2).toFixed(1)
+      });
+    }
+    return historicalPoints;
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem("nebula_command_history", JSON.stringify(commandHistory));
@@ -253,14 +292,23 @@ export default function VpsManager() {
 
   // Fluctuating real-time diagnostics task
   useEffect(() => {
+    if (!isLiveRefreshEnabled) return;
+
     const intervalId = setInterval(() => {
+      let currentDr = 12.4;
+      let currentDw = 4.2;
+      let currentCpu = 45.3;
+      let currentRam = 61.2;
+
       setDiskRead((prev) => {
         const next = Math.max(0.5, +(prev + (Math.random() * 4 - 2)).toFixed(1));
+        currentDr = next;
         setDiskReadHist((h) => [...h.slice(1), Math.round(next)]);
         return next;
       });
       setDiskWrite((prev) => {
         const next = Math.max(0.1, +(prev + (Math.random() * 2 - 1)).toFixed(1));
+        currentDw = next;
         setDiskWriteHist((h) => [...h.slice(1), Math.round(next)]);
         return next;
       });
@@ -276,16 +324,34 @@ export default function VpsManager() {
       });
       setCpuUsage((prev) => {
         const change = Math.random() * 12 - 6; // -6 to +6%
-        return Math.max(5, Math.min(99, +(prev + change).toFixed(1)));
+        const next = Math.max(5, Math.min(99, +(prev + change).toFixed(1)));
+        currentCpu = next;
+        return next;
       });
       setRamUsage((prev) => {
         const change = Math.random() * 4 - 2; // -2 to +2%
-        return Math.max(10, Math.min(99, +(prev + change).toFixed(1)));
+        const next = Math.max(10, Math.min(99, +(prev + change).toFixed(1)));
+        currentRam = next;
+        return next;
       });
-    }, 3000);
+
+      setTelemetryHistoryLog((prev) => {
+        const nowStr = new Date().toISOString();
+        const nextPoint: TelemetryDataPoint = {
+          timestamp: nowStr,
+          cpu: currentCpu,
+          ram: currentRam,
+          diskRead: currentDr,
+          diskWrite: currentDw
+        };
+        const updated = [...prev, nextPoint];
+        const thirtyMinsAgo = Date.now() - 30 * 60 * 1000;
+        return updated.filter(p => new Date(p.timestamp).getTime() > thirtyMinsAgo);
+      });
+    }, refreshFrequency);
 
     return () => clearInterval(intervalId);
-  }, []);
+  }, [isLiveRefreshEnabled, refreshFrequency]);
 
   // Update baseline CPU & RAM on selected VPS variation
   useEffect(() => {
@@ -294,6 +360,9 @@ export default function VpsManager() {
     const baselineRam = Math.floor(Math.random() * 30) + 30; // 30 - 60%
     setCpuUsage(baselineCpu);
     setRamUsage(baselineRam);
+
+    // Seed realistic 30 minutes of historical telemetry entries
+    setTelemetryHistoryLog(generateTelemetryHistory(selectedVps.name));
   }, [selectedVps?.id]);
 
   // Alert simulation triggers
@@ -733,6 +802,94 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
       `[REPORTS] Generated ${format.toUpperCase()} diagnostic snapshot report download for ${selectedVps.name}.`,
       `[REPORTS] active config metadata and kernel activity logs.`
     ]);
+  };
+
+  const downloadTelemetryReport = (format: "json" | "csv") => {
+    if (!selectedVps) return;
+    
+    // Sort by timestamp asc
+    const dataPoints = [...telemetryHistoryLog].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    if (format === "json") {
+      const dataStr = JSON.stringify({
+        server: {
+          id: selectedVps.id,
+          name: selectedVps.name,
+          ip: selectedVps.ip,
+          region: selectedVps.region
+        },
+        exportTime: new Date().toISOString(),
+        telemetryPointsCount: dataPoints.length,
+        telemetryData: dataPoints
+      }, null, 2);
+      
+      const blob = new Blob([dataStr], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${selectedVps.name}_diagnostics_${Date.now()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } else {
+      let csvContent = "Timestamp,CPU_Usage_Pct,RAM_Usage_Pct,Disk_Read_MBs,Disk_Write_MBs\n";
+      dataPoints.forEach((p) => {
+        csvContent += `${p.timestamp},${p.cpu},${p.ram},${p.diskRead},${p.diskWrite}\n`;
+      });
+      
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${selectedVps.name}_diagnostics_${Date.now()}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
+
+    setTerminalHistory(prev => [
+      ...prev,
+      `[MONITOR] 📊 Exported 30-minute high-fidelity ${format.toUpperCase()} telemetry log for ${selectedVps.name}.`
+    ]);
+  };
+
+  const handleQuickAction = (action: "cache" | "services" | "temp") => {
+    setIsProcessingAction(action);
+    
+    let termMsg = "";
+    let logsUpdate = "";
+    if (action === "cache") {
+      termMsg = `[HW-DIAG] $ sync; echo 3 > /proc/sys/vm/drop_caches`;
+      logsUpdate = "Cache flushed. Reclaimed ~1.2 GB of inactive kernel page caches.";
+    } else if (action === "services") {
+      termMsg = `[HW-DIAG] $ systemctl restart nebula-hypervisor.service`;
+      logsUpdate = "Hypervisor micro-services restarted successfully. Active connections synchronized.";
+    } else {
+      termMsg = `[HW-DIAG] $ rm -rf /tmp/* /var/tmp/*`;
+      logsUpdate = "Temporary system storage tables purged. Cleared 674 MB of ephemeral logs.";
+    }
+
+    setTerminalHistory(prev => [
+      ...prev,
+      termMsg,
+      `[HW-DIAG] Active Node: "${selectedVps?.name}" | Initiating operation...`,
+      `[HW-DIAG] SUCCESS: ${logsUpdate}`
+    ]);
+
+    setDiagnosticsLog(`[Action: ${action.toUpperCase()}] Running task...`);
+
+    setTimeout(() => {
+      setIsProcessingAction(null);
+      setDiagnosticsLog(`SUCCESS: ${logsUpdate}`);
+      
+      if (action === "services") {
+        setCpuUsage(prev => Math.min(95, prev + 15));
+        setRamUsage(prev => Math.max(10, prev - 8));
+      } else if (action === "cache") {
+        setCpuUsage(prev => Math.min(95, prev + 5));
+        setRamUsage(prev => Math.max(10, prev - 15));
+      } else if (action === "temp") {
+        setCpuUsage(prev => Math.min(95, prev + 3));
+      }
+    }, 1200);
   };
 
   const updateSnapshotSchedule = (interval: "hourly" | "daily" | "weekly" | "custom", enabled: boolean, customCron?: string) => {
@@ -1672,7 +1829,7 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
             </div>
 
             {/* Sub-panels layout: Console / Diagnostics + Firewall & Alerts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+            <div className={`grid grid-cols-1 ${activeDetailTab === "diagnostics" && isDiagnosticsMaximized ? "grid-cols-1" : "md:grid-cols-2"} gap-6 mt-4`}>
               
               {activeDetailTab === "terminal" ? (
                 /* Retro Terminal Console Emulator */
@@ -1754,156 +1911,465 @@ MIIJKQIBAAKCAgEAytLd2PqD8l/lE9f/M3t+vA6Rz2L7XU==
               ) : (
                 /* Task 5: Hardware Diagnostics Panel */
                 <div 
-                  className={`bg-slate-950 rounded-xl border p-5 flex flex-col min-h-[460px] justify-between gap-4 transition-all duration-500 relative ${
+                  className={`bg-slate-950 rounded-xl border p-5 flex flex-col transition-all duration-300 relative ${
+                    isDiagnosticsMaximized ? "min-h-[500px]" : "min-h-[460px]"
+                  } ${
                     selectedVps.alerts?.enabled && (cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) || ramUsage > (selectedVps.alerts?.ramThreshold ?? 90))
                       ? "border-pink-500/80 shadow-[0_0_20px_rgba(244,63,94,0.25)] bg-slate-950/95"
                       : "border-slate-855"
                   }`}
                   id="diagnostics_panel"
                 >
-                  <div>
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-900 mb-4 gap-2 flex-wrap">
-                      <span className="text-xs font-bold font-mono tracking-wider uppercase text-cyan-400 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-cyan-400 animate-pulse" /> HW Metric Diagnoses
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={openAlertModal}
-                          className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-mono font-bold uppercase rounded bg-indigo-950/60 hover:bg-slate-900 border border-indigo-900/55 text-indigo-300 hover:text-white transition cursor-pointer"
-                        >
-                          <Sliders className="w-3 h-3" />
-                          Configure Threshold Alerts
-                        </button>
-                        <span className="text-[10px] font-mono text-cyan-450 text-cyan-400 bg-cyan-950/40 border border-cyan-805 px-2 py-0.5 rounded-full animate-pulse">Live Feed</span>
+                  <div className="flex flex-col h-full justify-between gap-4">
+                    <div>
+                      {/* Diagnostic Panel Header */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-900 mb-4 gap-2 flex-wrap">
+                        <span className="text-xs font-bold font-mono tracking-wider uppercase text-cyan-400 flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-cyan-400 animate-pulse" /> HW Metric Diagnoses
+                        </span>
+                        
+                        <div className="flex items-center gap-2 flex-wrap text-sans">
+                          {/* Live Refresh and Interval configuration */}
+                          <div className="flex items-center bg-slate-900 border border-slate-800 rounded px-2 py-1 gap-2 text-[10px] font-mono">
+                            <label className="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                              <input
+                                type="checkbox"
+                                checked={isLiveRefreshEnabled}
+                                onChange={(e) => setIsLiveRefreshEnabled(e.target.checked)}
+                                className="w-3 h-3 accent-cyan-500 cursor-pointer bg-slate-950 rounded border-slate-800"
+                              />
+                              <span>Auto-Refresh</span>
+                            </label>
+                            
+                            {isLiveRefreshEnabled && (
+                              <select
+                                value={refreshFrequency}
+                                onChange={(e) => setRefreshFrequency(parseInt(e.target.value))}
+                                className="bg-transparent border-none text-[9px] text-cyan-400 font-bold outline-none cursor-pointer p-0"
+                              >
+                                <option value="1000">1s rate</option>
+                                <option value="3000">3s rate</option>
+                                <option value="5000">5s rate</option>
+                              </select>
+                            )}
+                          </div>
+
+                          {/* Export Diagnostics button */}
+                          <div className="flex items-center bg-slate-905 bg-slate-900 border border-slate-800 rounded py-0.5 text-[10px] font-mono px-1">
+                            <span className="text-[9px] text-slate-500 font-semibold px-2">Export Log:</span>
+                            <button
+                              type="button"
+                              onClick={() => downloadTelemetryReport("json")}
+                              className="px-2 py-0.5 hover:text-cyan-400 text-slate-300 transition cursor-pointer font-bold"
+                              title="Export last 30 minutes to JSON"
+                            >
+                              JSON
+                            </button>
+                            <span className="text-slate-800">|</span>
+                            <button
+                              type="button"
+                              onClick={() => downloadTelemetryReport("csv")}
+                              className="px-2 py-0.5 hover:text-cyan-400 text-slate-300 transition cursor-pointer font-bold"
+                              title="Export last 30 minutes to CSV"
+                            >
+                              CSV
+                            </button>
+                          </div>
+
+                          {/* Maximize Toggle Button */}
+                          <button
+                            type="button"
+                            onClick={() => setIsDiagnosticsMaximized(!isDiagnosticsMaximized)}
+                            className="p-1 px-2.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 transition flex items-center gap-1 cursor-pointer"
+                            title={isDiagnosticsMaximized ? "Collaborate page split view" : "Maximize diagnostics view"}
+                          >
+                            {isDiagnosticsMaximized ? (
+                              <>
+                                <Minimize2 className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>Minimize</span>
+                              </>
+                            ) : (
+                              <>
+                                <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Maximize</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={openAlertModal}
+                            className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-mono font-bold uppercase rounded bg-indigo-950/60 hover:bg-slate-900 border border-indigo-900/55 text-indigo-300 hover:text-white transition cursor-pointer"
+                          >
+                            <Sliders className="w-3 h-3" />
+                            Configure Threshold Alerts
+                          </button>
+                        </div>
                       </div>
                     </div>
+                                     {/* Body structure: dynamic list/split column grid layout */}
+                    <div className={`grid gap-6 ${isDiagnosticsMaximized ? "grid-cols-1 md:grid-cols-12" : "grid-cols-1"}`}>
+                      
+                      {/* Left Section: Standard Guages (span 5/12 when maximized) */}
+                      <div className={`${isDiagnosticsMaximized ? "md:col-span-5 space-y-4" : "space-y-4"}`}>
+                        
+                        {/* Breach visual warning banner inside panel */}
+                        {selectedVps.alerts?.enabled && (cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) || ramUsage > (selectedVps.alerts?.ramThreshold ?? 90)) && (
+                          <div className="bg-pink-955/30 border border-pink-500/40 rounded-lg p-2.5 flex items-center gap-2 animate-pulse mb-3">
+                            <ShieldAlert className="w-4 h-4 text-pink-500 animate-bounce" />
+                            <div>
+                              <div className="text-[10px] uppercase font-mono font-bold text-pink-400">🚨 EXCEEDED MASTER THRESHOLD</div>
+                              <div className="text-[8px] font-mono text-slate-400">
+                                {cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) && `CPU utilization (${cpuUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.cpuThreshold}%. `}
+                                {ramUsage > (selectedVps.alerts?.ramThreshold ?? 90) && `RAM memory load (${ramUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.ramThreshold}%.`}
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
-                    {/* Breach visual warning banner inside panel */}
-                    {selectedVps.alerts?.enabled && (cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) || ramUsage > (selectedVps.alerts?.ramThreshold ?? 90)) && (
-                      <div className="mb-4 bg-pink-955/30 border border-pink-500/40 rounded-lg p-2.5 flex items-center gap-2 animate-pulse">
-                        <ShieldAlert className="w-4 h-4 text-pink-500" />
-                        <div>
-                          <div className="text-[10px] uppercase font-mono font-bold text-pink-400">🚨 EXCEEDED MASTER THRESHOLD</div>
-                          <div className="text-[8px] font-mono text-slate-400">
-                            {cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 85) && `CPU utilization (${cpuUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.cpuThreshold}%. `}
-                            {ramUsage > (selectedVps.alerts?.ramThreshold ?? 90) && `RAM memory load (${ramUsage.toFixed(1)}%) exceeds active alarm trigger of ${selectedVps.alerts.ramThreshold}%.`}
+                        <div className="space-y-4">
+                          {/* CPU Utilization */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">⚡ CPU Utilization</span>
+                              <span className={`font-bold ${cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{cpuUsage.toFixed(1)}%</span>
+                            </div>
+                            <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
+                              <div 
+                                className={`h-full transition-all duration-1000 ${
+                                  cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-505"
+                                }`} 
+                                style={{ width: `${cpuUsage}%` }}
+                              ></div>
+                              {selectedVps.alerts?.enabled && (
+                                <div 
+                                  className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
+                                  style={{ left: `${selectedVps.alerts.cpuThreshold}%` }}
+                                  title={`CPU Alert Threshold: ${selectedVps.alerts.cpuThreshold}%`}
+                                ></div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* RAM Memory Utilization */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">🧠 RAM Memory Utilization</span>
+                              <span className={`font-bold ${ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{ramUsage.toFixed(1)}%</span>
+                            </div>
+                            <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
+                              <div 
+                                className={`h-full transition-all duration-1000 ${
+                                  ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-505"
+                                }`} 
+                                style={{ width: `${ramUsage}%` }}
+                              ></div>
+                              {selectedVps.alerts?.enabled && (
+                                <div 
+                                  className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
+                                  style={{ left: `${selectedVps.alerts.ramThreshold}%` }}
+                                  title={`RAM Alert Threshold: ${selectedVps.alerts.ramThreshold}%`}
+                                ></div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Disk Read Throughput */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">💾 Disk Read Throughput</span>
+                              <span className="text-emerald-400 font-bold">{diskRead.toFixed(1)} MB/s</span>
+                            </div>
+                            <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
+                              <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${Math.min((diskRead / 30) * 100, 100)}%` }}></div>
+                            </div>
+                          </div>
+
+                          {/* Disk Write Throughput */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">💾 Disk Write Throughput</span>
+                              <span className="text-cyan-400 font-bold">{diskWrite.toFixed(1)} MB/s</span>
+                            </div>
+                            <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
+                              <div className="bg-cyan-500 h-full transition-all duration-1000" style={{ width: `${Math.min((diskWrite / 30) * 100, 100)}%` }}></div>
+                            </div>
+                          </div>
+
+                          {/* RX Ingress Packets */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">📥 Ingress (RX) Rate</span>
+                              <span className="text-indigo-400 font-bold">{netRx.toFixed(1)} KB/s</span>
+                            </div>
+                            <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
+                              <div className="bg-indigo-500 h-full transition-all duration-1000" style={{ width: `${Math.min((netRx / 500) * 100, 100)}%` }}></div>
+                            </div>
+                          </div>
+
+                          {/* TX Egress Packets */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-400">📤 Egress (TX) Rate</span>
+                              <span className="text-pink-400 font-bold">{netTx.toFixed(1)} KB/s</span>
+                            </div>
+                            <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-853">
+                              <div className="bg-pink-500 h-full transition-all duration-1000" style={{ width: `${Math.min((netTx / 500) * 100, 100)}%` }}></div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
 
-                    <div className="space-y-4">
-                      {/* CPU Utilization */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">⚡ CPU Utilization</span>
-                          <span className={`font-bold ${cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{cpuUsage.toFixed(1)}%</span>
-                        </div>
-                        <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              cpuUsage > (selectedVps.alerts?.cpuThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-500"
-                            }`} 
-                            style={{ width: `${cpuUsage}%` }}
-                          ></div>
-                          {selectedVps.alerts?.enabled && (
-                            <div 
-                              className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
-                              style={{ left: `${selectedVps.alerts.cpuThreshold}%` }}
-                              title={`CPU Alert Threshold: ${selectedVps.alerts.cpuThreshold}%`}
-                            ></div>
+                        {/* Quick Actions Panel */}
+                        <div className="bg-slate-900/65 p-3.5 rounded-lg border border-slate-850 space-y-2.5">
+                          <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest block font-bold">Node Quick Diagnostic Actions</span>
+                          <div className="flex flex-wrap gap-2 text-sans">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickAction("cache")}
+                              disabled={isProcessingAction !== null}
+                              className="flex-1 min-w-[95px] text-center px-2 py-1.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-950 hover:bg-slate-900 border border-slate-800 text-cyan-300 hover:text-white transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {isProcessingAction === "cache" ? <RotateCw className="w-3 h-3 animate-spin text-cyan-400" /> : "🧼 Clear Cache"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickAction("services")}
+                              disabled={isProcessingAction !== null}
+                              className="flex-1 min-w-[95px] text-center px-2 py-1.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-950 hover:bg-slate-900 border border-slate-800 text-indigo-300 hover:text-white transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {isProcessingAction === "services" ? <RotateCw className="w-3 h-3 animate-spin text-cyan-400" /> : "⚡ Restart Svcs"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickAction("temp")}
+                              disabled={isProcessingAction !== null}
+                              className="flex-1 min-w-[95px] text-center px-2 py-1.5 text-[9px] font-mono font-bold uppercase rounded bg-slate-950 hover:bg-slate-900 border border-slate-800 text-pink-300 hover:text-white transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                            >
+                              {isProcessingAction === "temp" ? <RotateCw className="w-3 h-3 animate-spin text-pink-400" /> : "🗑️ Wipe Temp"}
+                            </button>
+                          </div>
+                          {diagnosticsLog && (
+                            <div className="text-[9px] font-mono text-slate-400 border-t border-slate-850/45 pt-2 mt-2 flex items-center gap-2">
+                              <span className={isProcessingAction ? "relative flex h-2 w-2" : "text-emerald-400 animate-pulse"}>
+                                {isProcessingAction ? (
+                                  <>
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-cyan-500"></span>
+                                  </>
+                                ) : (
+                                  "●"
+                                )}
+                              </span>
+                              <span className="truncate">{diagnosticsLog}</span>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {/* RAM Memory Utilization */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">🧠 RAM Memory Utilization</span>
-                          <span className={`font-bold ${ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "text-pink-400 font-extrabold animate-pulse" : "text-indigo-400"}`}>{ramUsage.toFixed(1)}%</span>
-                        </div>
-                        <div className="relative w-full bg-slate-900 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                          <div 
-                            className={`h-full transition-all duration-1000 ${
-                              ramUsage > (selectedVps.alerts?.ramThreshold ?? 80) ? "bg-pink-500 animate-pulse" : "bg-indigo-505"
-                            }`} 
-                            style={{ width: `${ramUsage}%` }}
-                          ></div>
-                          {selectedVps.alerts?.enabled && (
-                            <div 
-                              className="absolute top-0 bottom-0 w-[2px] bg-pink-400/85"
-                              style={{ left: `${selectedVps.alerts.ramThreshold}%` }}
-                              title={`RAM Alert Threshold: ${selectedVps.alerts.ramThreshold}%`}
-                            ></div>
-                          )}
-                        </div>
-                      </div>
+                      {/* Right Section: Timeseries SVG (span 7/12 when maximized) */}
+                      {isDiagnosticsMaximized ? (
+                        <div className="md:col-span-12 lg:col-span-7 flex flex-col justify-between h-full space-y-4">
+                          <div className="bg-slate-900/40 border border-slate-850 rounded-xl p-4 flex flex-col justify-between flex-1 min-h-[300px]">
+                            
+                            <div className="flex items-center justify-between mb-3 border-b border-slate-850 pb-2">
+                              <div>
+                                <span className="text-[10px] font-mono font-bold text-slate-300 block uppercase">Telemetry Historic Analytics (30m)</span>
+                                <span className="text-[9px] font-mono text-slate-500 font-medium">Vector-drawn continuous sliding telemetry data</span>
+                              </div>
+                              <div className="flex bg-slate-950 p-1 rounded border border-slate-850 gap-1 text-[9px] font-mono">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChartType("all")}
+                                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                                    selectedChartType === "all" ? "bg-indigo-600/35 text-indigo-300 font-bold" : "text-slate-400 hover:text-slate-200"
+                                  }`}
+                                >
+                                  ALL
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChartType("cpu")}
+                                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                                    selectedChartType === "cpu" ? "bg-indigo-600/35 text-indigo-300 font-bold" : "text-slate-400 hover:text-slate-200"
+                                  }`}
+                                >
+                                  CPU
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChartType("ram")}
+                                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                                    selectedChartType === "ram" ? "bg-pink-600/35 text-pink-300 font-bold" : "text-slate-400 hover:text-slate-200"
+                                  }`}
+                                >
+                                  RAM
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedChartType("disk")}
+                                  className={`px-2 py-0.5 rounded cursor-pointer ${
+                                    selectedChartType === "disk" ? "bg-emerald-600/35 text-emerald-300 font-bold" : "text-slate-400 hover:text-slate-200"
+                                  }`}
+                                >
+                                  DISK
+                                </button>
+                              </div>
+                            </div>
 
-                      {/* Disk Read Throughput */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">💾 Disk Read Throughput</span>
-                          <span className="text-emerald-400 font-bold">{diskRead.toFixed(1)} MB/s</span>
-                        </div>
-                        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
-                          <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${Math.min((diskRead / 30) * 100, 100)}%` }}></div>
-                        </div>
-                      </div>
+                            {telemetryHistoryLog.length >= 2 ? (() => {
+                              const n = telemetryHistoryLog.length;
+                              const H = 140;
+                              const W = 350;
+                              const padX = 40;
+                              const padY = 20;
 
-                      {/* Disk Write Throughput */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">💾 Disk Write Throughput</span>
-                          <span className="text-cyan-400 font-bold">{diskWrite.toFixed(1)} MB/s</span>
-                        </div>
-                        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
-                          <div className="bg-cyan-500 h-full transition-all duration-1000" style={{ width: `${Math.min((diskWrite / 30) * 100, 100)}%` }}></div>
-                        </div>
-                      </div>
+                              const getSvgPathStr = (type: "cpu" | "ram" | "diskRead" | "diskWrite", fill = false) => {
+                                let pts = "";
+                                telemetryHistoryLog.forEach((p, idx) => {
+                                  const x = padX + (idx / (n - 1)) * W;
+                                  let val = 0;
+                                  if (type === "cpu") val = p.cpu;
+                                  else if (type === "ram") val = p.ram;
+                                  else if (type === "diskRead") val = (Math.min(p.diskRead, 30) / 30) * 100;
+                                  else if (type === "diskWrite") val = (Math.min(p.diskWrite, 30) / 30) * 100;
 
-                      {/* RX Ingress Packets */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">📥 Ingress (RX) Rate</span>
-                          <span className="text-indigo-400 font-bold">{netRx.toFixed(1)} KB/s</span>
-                        </div>
-                        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-850">
-                          <div className="bg-indigo-500 h-full transition-all duration-1000" style={{ width: `${Math.min((netRx / 500) * 100, 100)}%` }}></div>
-                        </div>
-                      </div>
+                                  const y = padY + H - (val / 100) * H;
+                                  pts += `${idx === 0 ? "M" : "L"} ${x} ${y} `;
+                                });
 
-                      {/* TX Egress Packets */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs font-mono">
-                          <span className="text-slate-400">📤 Egress (TX) Rate</span>
-                          <span className="text-pink-400 font-bold">{netTx.toFixed(1)} KB/s</span>
-                        </div>
-                        <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-853">
-                          <div className="bg-pink-500 h-full transition-all duration-1000" style={{ width: `${Math.min((netTx / 500) * 100, 100)}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                                if (fill) {
+                                  const xFirst = padX;
+                                  const xLast = padX + W;
+                                  const yBottom = padY + H;
+                                  pts += `L ${xLast} ${yBottom} L ${xFirst} ${yBottom} Z`;
+                                }
+                                return pts;
+                              };
 
-                  {/* Tiny 10s Window Spark Area */}
-                  <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest block">Disk Write 10s History Chart</span>
-                      <span className="text-[9px] font-mono text-cyan-400">Realtime Spark</span>
-                    </div>
-                    <div className="flex items-end gap-1 h-[45px] pt-1">
-                      {diskWriteHist.map((val, idx) => {
-                        const h = Math.min((val / 15) * 100, 100);
-                        return (
-                          <div
-                            key={idx}
-                            title={`Write: ${val} MB/s`}
-                            className="bg-cyan-500/70 hover:bg-cyan-400 flex-1 rounded-t transition-all duration-500 cursor-pointer"
-                            style={{ height: `${h}%` }}
-                          ></div>
-                        );
-                      })}
+                              return (
+                                <div className="flex-1 flex flex-col justify-between">
+                                  <svg className="w-full h-[185px] overflow-visible" viewBox="0 0 410 185">
+                                    <defs>
+                                      <linearGradient id="cpuAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#818cf8" stopOpacity="0.25" />
+                                        <stop offset="100%" stopColor="#818cf8" stopOpacity="0.0" />
+                                      </linearGradient>
+                                      <linearGradient id="ramAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.25" />
+                                        <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+                                      </linearGradient>
+                                      <linearGradient id="diskAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+                                        <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                                      </linearGradient>
+                                    </defs>
+
+                                    {[0, 25, 50, 75, 100].map((tick) => {
+                                      const y = padY + H - (tick / 100) * H;
+                                      return (
+                                        <g key={tick} className="opacity-45 text-slate-500">
+                                          <line
+                                            x1={padX}
+                                            y1={y}
+                                            x2={padX + W}
+                                            y2={y}
+                                            stroke="#1e293b"
+                                            strokeDasharray="2 3"
+                                            strokeWidth="1"
+                                          />
+                                          <text x={padX - 8} y={y + 3} textAnchor="end" className="text-[8px] font-mono fill-slate-500 font-medium">
+                                            {selectedChartType === "disk" ? `${Math.round(tick * 30 / 100)}Mb` : `${tick}%`}
+                                          </text>
+                                        </g>
+                                      );
+                                    })}
+
+                                    <g className="text-slate-500">
+                                      <line x1={padX} y1={padY + H} x2={padX + W} y2={padY + H} stroke="#334155" strokeWidth="1" />
+                                      <text x={padX} y={padY + H + 12} className="text-[8px] font-mono fill-slate-500" textAnchor="start">30m ago</text>
+                                      <text x={padX + W / 2} y={padY + H + 12} className="text-[8px] font-mono fill-slate-500" textAnchor="middle">15m ago</text>
+                                      <text x={padX + W} y={padY + H + 12} className="text-[8px] font-mono fill-slate-500" textAnchor="end">Now</text>
+                                    </g>
+
+                                    {(selectedChartType === "all" || selectedChartType === "cpu") && (
+                                      <>
+                                        <path d={getSvgPathStr("cpu", true)} fill="url(#cpuAreaGrad)" />
+                                        <path d={getSvgPathStr("cpu", false)} fill="none" stroke="#818cf8" strokeWidth="1.5" strokeLinecap="round" />
+                                      </>
+                                    )}
+                                    {(selectedChartType === "all" || selectedChartType === "ram") && (
+                                      <>
+                                        <path d={getSvgPathStr("ram", true)} fill="url(#ramAreaGrad)" />
+                                        <path d={getSvgPathStr("ram", false)} fill="none" stroke="#f43f5e" strokeWidth="1.5" strokeLinecap="round" />
+                                      </>
+                                    )}
+                                    {selectedChartType === "disk" && (
+                                      <>
+                                        <path d={getSvgPathStr("diskRead", true)} fill="url(#diskAreaGrad)" />
+                                        <path d={getSvgPathStr("diskRead", false)} fill="none" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" />
+                                        <path d={getSvgPathStr("diskWrite", false)} fill="none" stroke="#06b6d4" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="3 3" />
+                                      </>
+                                    )}
+                                  </svg>
+
+                                  <div className="flex flex-wrap items-center justify-center gap-4 text-[9px] font-mono border-t border-slate-850 pt-2 text-slate-400">
+                                    {(selectedChartType === "all" || selectedChartType === "cpu") && (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="w-2.5 h-1.5 bg-indigo-500 rounded-sm"></span>
+                                        <span>CPU: avg {((telemetryHistoryLog.reduce((acc, p) => acc + p.cpu, 0)) / n).toFixed(1)}%</span>
+                                      </div>
+                                    )}
+                                    {(selectedChartType === "all" || selectedChartType === "ram") && (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="w-2.5 h-1.5 bg-pink-500 rounded-sm"></span>
+                                        <span>RAM: avg {((telemetryHistoryLog.reduce((acc, p) => acc + p.ram, 0)) / n).toFixed(1)}%</span>
+                                      </div>
+                                    )}
+                                    {selectedChartType === "disk" && (
+                                      <>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="w-2.5 h-1.5 bg-emerald-500 rounded-sm"></span>
+                                          <span>Disk Read</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="w-2.5 border-t border-dashed border-cyan-400"></span>
+                                          <span>Disk Write</span>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })() : (
+                              <div className="text-[10px] font-mono font-semibold text-slate-500 text-center py-12">
+                                Populating timeline sliding cache logs...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Minimized Sparkline Chart default */
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-850">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest block">Disk Write 10s History Chart</span>
+                            <span className="text-[9px] font-mono text-cyan-400">Realtime Spark</span>
+                          </div>
+                          <div className="flex items-end gap-1 h-[45px] pt-1">
+                            {diskWriteHist.map((val, idx) => {
+                              const h = Math.min((val / 15) * 100, 100);
+                              return (
+                                <div
+                                  key={idx}
+                                  title={`Write: ${val} MB/s`}
+                                  className="bg-cyan-500/70 hover:bg-cyan-400 flex-1 rounded-t transition-all duration-500 cursor-pointer"
+                                  style={{ height: `${h}%` }}
+                                ></div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                     </div>
                   </div>
                 </div>
